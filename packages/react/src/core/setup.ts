@@ -2,49 +2,18 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
 import { context } from "./context";
 import { VNode } from "./types";
-// [UPDATE] 'setDomProps'를 임포트합니다.
-import { removeInstance, setDomProps } from "./dom";
+// [FIX] hooks.ts의 (스텁) 함수를 임포트해야 합니다.
 import { cleanupUnusedHooks } from "./hooks";
 import { render } from "./render";
-import { TEXT_ELEMENT, Fragment } from "./constants";
 
 /**
- * [Phase 3 업데이트]
- * VNode를 실제 DOM 노드로 변환하여 컨테이너에 삽입합니다.
- * 이제 'setDomProps'를 사용하여 모든 속성을 올바르게 설정합니다.
+ * [DELETE]
+ * 임시 mount 함수는 Phase 5의 reconciler가 대체하므로 제거합니다.
  */
-function mount(node: VNode, container: HTMLElement) {
-  if (node.type === Fragment && Array.isArray(node.props.children)) {
-    node.props.children.forEach((child: VNode) => mount(child, container));
-    return;
-  }
-
-  let dom: HTMLElement | Text;
-
-  if (node.type === TEXT_ELEMENT) {
-    dom = document.createTextNode(node.props.nodeValue as string);
-  } else {
-    // 1. DOM 요소 생성 (유형이 함수가 아니라고 가정)
-    dom = document.createElement(node.type as string);
-
-    // 2. [UPDATE] setDomProps를 사용하여 모든 속성(style, event 등)을 설정합니다.
-    //    이것이 "3단계: style 객체..." 테스트를 통과시킵니다.
-    setDomProps(dom as HTMLElement, node.props);
-  }
-
-  // 3. 자식 노드 재귀 마운트
-  if (node.props.children) {
-    node.props.children.forEach((child: VNode) => {
-      // 자식의 부모는 'dom' 요소입니다.
-      mount(child, dom as HTMLElement);
-    });
-  }
-
-  // 4. 생성된 DOM을 부모 컨테이너에 삽입
-  container.appendChild(dom);
-}
+// function mount(node: VNode, container: HTMLElement) { ... }
 
 /**
+ * [Phase 5 업데이트]
  * Mini-React 애플리케이션의 루트를 설정하고 첫 렌더링을 시작합니다.
  */
 export const setup = (rootNode: VNode | null, container: HTMLElement): void => {
@@ -58,9 +27,16 @@ export const setup = (rootNode: VNode | null, container: HTMLElement): void => {
     throw new Error("MiniReact: 루트 엘리먼트는 null일 수 없습니다.");
   }
 
-  // 3. 이전 렌더링 내용 정리
+  // 3. [FIX] '렌더는 컨테이너 내용을 새 DOM으로 교체한다' 테스트 통과를 위해
+  //    컨테이너를 비우는 로직을 여기에 다시 추가합니다.
   container.innerHTML = "";
 
-  // 4. 첫 렌더링 실행
-  mount(rootNode, container);
+  // 4. 루트 컨텍스트를 리셋합니다.
+  context.root.reset({
+    container,
+    node: rootNode,
+  });
+
+  // 5. 첫 렌더링을 실행(트리거)합니다.
+  render();
 };
