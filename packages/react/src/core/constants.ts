@@ -1,3 +1,4 @@
+//core/constants.ts
 import { ValueOf } from "../types";
 
 export const TEXT_ELEMENT = Symbol("mini-react.text");
