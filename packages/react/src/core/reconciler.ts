@@ -1,10 +1,10 @@
-// core/reconciler.ts (v18)
+// core/reconciler.ts (v21 - Explicit Skip Delete)
 import { context, enterComponent, exitComponent } from "./context";
 import { Fragment, NodeTypes, TEXT_ELEMENT, NodeType } from "./constants";
 import { Instance, VNode } from "./types";
 import { getFirstDom, insertInstance, removeInstance, setDomProps, updateDomProps } from "./dom";
 import { createChildPath } from "./elements";
-import { cleanupEffects, deleteComponentSafe } from "./hooks";
+import { cleanupEffects, deleteComponent } from "./hooks";
 
 function getNextUsableAnchor(node: Node | null): HTMLElement | Text | null {
   if (node === null) return null;
@@ -14,10 +14,6 @@ function getNextUsableAnchor(node: Node | null): HTMLElement | Text | null {
   return getNextUsableAnchor(node.nextSibling);
 }
 
-/*function isDomNode(node: Node | null): node is HTMLElement | Text {
-  return node !== null && (node.nodeType === Node.ELEMENT_NODE || node.nodeType === Node.TEXT_NODE);
-}*/
-
 function getNodeType(type: VNode["type"]): NodeType {
   if (typeof type === "string") return NodeTypes.HOST;
   if (type === TEXT_ELEMENT) return NodeTypes.TEXT;
@@ -26,7 +22,7 @@ function getNodeType(type: VNode["type"]): NodeType {
   throw new Error(`Unknown VNode type: ${String(type)}`);
 }
 
-// --- Mount / Update 통합 ---
+// --- Mount / Update (이전과 동일) ---
 
 function mountComponent(
   parentDom: HTMLElement,
@@ -62,7 +58,6 @@ function mountHost(parentDom: HTMLElement, node: VNode, path: string, anchor: HT
     dom = document.createElement(node.type as string);
     setDomProps(dom as HTMLElement, node.props);
   }
-
   const instance: Instance = {
     node,
     dom,
@@ -71,7 +66,6 @@ function mountHost(parentDom: HTMLElement, node: VNode, path: string, anchor: HT
     kind: getNodeType(node.type),
     key: node.key,
   };
-
   instance.children = reconcileChildren(dom as HTMLElement, instance, node.props.children || [], path, null);
   insertInstance(parentDom, instance, anchor);
   return instance;
@@ -86,7 +80,6 @@ function mountFragment(parentDom: HTMLElement, node: VNode, path: string, anchor
     kind: NodeTypes.FRAGMENT,
     key: node.key,
   };
-
   instance.children = reconcileChildren(parentDom, instance, node.props.children || [], path, anchor);
   return instance;
 }
@@ -105,8 +98,6 @@ function mount(parentDom: HTMLElement, node: VNode, path: string, anchor: HTMLEl
       throw new Error("Unknown node type during mount");
   }
 }
-
-// --- Update ---
 
 function updateComponent(
   parentDom: HTMLElement,
@@ -143,27 +134,27 @@ function updateFragment(parentDom: HTMLElement, instance: Instance, node: VNode,
   return instance;
 }
 
-// --- Unmount ---
+// --- Unmount (수정됨) ---
 
-function unmount(parentDom: HTMLElement, instance: Instance | null): void {
+/**
+ * [FIX] skipStateDelete 옵션 추가
+ * true일 경우 DOM만 제거하고 Hook 상태는 유지합니다. (다른 컴포넌트가 그 자리를 차지했을 때 사용)
+ */
+function unmount(parentDom: HTMLElement, instance: Instance | null, skipStateDelete = false): void {
   if (!instance) return;
-
-  // DOM 제거는 항상
   removeInstance(parentDom, instance);
-
-  // Effect cleanup
   cleanupEffects(instance.path);
 
-  // 상태 삭제는 path 존재 시 안전하게
-  if (instance.path) deleteComponentSafe(instance.path);
+  if (!skipStateDelete) {
+    deleteComponent(instance.path);
+  }
 
-  // 자식 unmount
   if (instance.children) {
-    instance.children.forEach((child) => unmount(parentDom, child));
+    instance.children.forEach((child) => unmount(parentDom, child, skipStateDelete));
   }
 }
 
-// --- Reconcile Children (Strict Matching & State Transfer) ---
+// --- Reconcile Children (With Explicit Collision Guard) ---
 
 function reconcileChildren(
   parentDom: HTMLElement,
@@ -200,7 +191,6 @@ function reconcileChildren(
       oldInstance = keyedOldMap.get(newVNode.key);
       if (oldInstance) keyedOldMap.delete(newVNode.key);
     } else {
-      // Strict Type Matching
       const matchIndex = unkeyedOldList.findIndex((old) => old.node.type === newVNode.type);
       if (matchIndex !== -1) {
         oldInstance = unkeyedOldList[matchIndex];
@@ -213,7 +203,7 @@ function reconcileChildren(
     const effectiveAnchorSource = lastPlacedDom ? lastPlacedDom.nextSibling : startAnchor;
     const anchor = getNextUsableAnchor(effectiveAnchorSource);
 
-    // 3. State Transfer with Safety
+    // 3. State Transfer
     if (oldInstance && oldInstance.path !== childPath) {
       const oldState = context.hooks.state.get(oldInstance.path);
       const oldCursor = context.hooks.cursor.get(oldInstance.path);
@@ -226,11 +216,7 @@ function reconcileChildren(
         context.hooks.cursor.set(childPath, oldCursor);
         context.hooks.cursor.delete(oldInstance.path);
       }
-
-      // oldInstance.path 업데이트
       oldInstance.path = childPath;
-
-      // ⚠ displacedInstance.path=null 제거 → DOM 삭제 보장
     }
 
     const newInstance = reconcile(parentDom, oldInstance || null, newVNode, childPath, anchor);
@@ -239,7 +225,6 @@ function reconcileChildren(
       newInstances[i] = newInstance;
       const newDom = getFirstDom(newInstance);
       if (newDom) {
-        // DOM Placement
         if (!oldInstance || newDom.previousSibling !== lastPlacedDom) {
           insertInstance(parentDom, newInstance, anchor);
         }
@@ -248,18 +233,25 @@ function reconcileChildren(
     }
   }
 
-  // 삭제 처리 시 안전하게 deleteComponentSafe 사용
-  keyedOldMap.forEach((child) => {
-    if (child.path !== null) unmount(parentDom, child);
+  // [CRITICAL FIX] Collision Guard with skipStateDelete
+  // 현재 생성된 자식들이 사용하는 Path 목록
+  const activePaths = new Set(newInstances.map((i) => i?.path));
+
+  // 삭제될 Unkeyed 자식들을 처리
+  unkeyedOldList.forEach((oldChild) => {
+    // 만약 삭제될 놈의 Path를 누군가(Footer) 이미 쓰고 있다면?
+    const shouldSkipDelete = activePaths.has(oldChild.path);
+    // DOM은 지우되, 상태는 지우지 마라! (Footer가 쓰고 있으니까)
+    unmount(parentDom, oldChild, shouldSkipDelete);
   });
-  unkeyedOldList.forEach((child) => {
-    if (child.path !== null) unmount(parentDom, child);
-  });
+
+  // Keyed 자식들은 Path가 고유하므로(key 기반) 충돌 걱정 없이 삭제
+  keyedOldMap.forEach((child) => unmount(parentDom, child));
 
   return newInstances;
 }
 
-// --- Main Reconcile ---
+// --- Main Reconcile (v17과 동일) ---
 export function reconcile(
   parentDom: HTMLElement,
   instance: Instance | null,
@@ -275,7 +267,6 @@ export function reconcile(
   if (instance === null) {
     return mount(parentDom, node, path, _anchor);
   }
-  // [FIX] node.type 자체가 변경되었는지 확인하여 컴포넌트 교체를 감지합니다.
   if (instance.key !== node.key || instance.node.type !== node.type) {
     unmount(parentDom, instance);
     return mount(parentDom, node, path, _anchor);

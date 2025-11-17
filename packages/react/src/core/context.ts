@@ -52,7 +52,10 @@ export const context: Context = {
 };
 
 // --- 컨텍스트 헬퍼 함수 ---
+
 export const resetHookContext = (): void => {
+  // [FIX] 렌더링 사이클이 시작될 때 커서 맵을 초기화합니다.
+  // enterComponent가 진입 시점에 0으로 설정하므로, 여기서 완전히 비워도 안전합니다.
   context.hooks.cursor.clear();
   context.hooks.visited.clear();
   context.hooks.componentStack = [];
@@ -68,6 +71,10 @@ export const getCurrentComponent = (): ComponentPath | null => {
 export const enterComponent = (path: ComponentPath): void => {
   context.hooks.componentStack.push(path);
   context.hooks.visited.add(path);
+
+  // [CRITICAL FIX] 컴포넌트 재진입(리렌더링) 시 반드시 커서를 0으로 리셋해야 합니다.
+  // 조건문(!has)을 제거하여 항상 0부터 훅을 시작하도록 보장합니다.
+  context.hooks.cursor.set(path, 0);
 };
 
 export const exitComponent = (): void => {

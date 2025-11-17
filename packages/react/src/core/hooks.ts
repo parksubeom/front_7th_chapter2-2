@@ -12,6 +12,7 @@ interface StateHook<T> {
 type Hook = StateHook<unknown> | EffectHook;
 
 // --- Effect 큐 및 클린업 로직 ---
+
 const flushEffects = () => {
   const { queue } = context.effects;
   const { state } = context.hooks;
@@ -21,12 +22,12 @@ const flushEffects = () => {
 
     if (!hook || hook.kind !== HookTypes.EFFECT) return;
 
-    if (hook.cleanup) hook.cleanup();
-
+    if (hook.cleanup) {
+      hook.cleanup();
+    }
     const newCleanup = hook.effect();
     hook.cleanup = typeof newCleanup === "function" ? newCleanup : null;
   });
-
   queue.length = 0;
 };
 
@@ -43,20 +44,6 @@ export const cleanupEffects = (path: string) => {
   }
 };
 
-/**
- * [NEW] 안전하게 컴포넌트 상태 삭제
- * 다른 컴포넌트가 이미 상태를 가져간 경우 삭제하지 않음
- */
-export function deleteComponentSafe(path: string) {
-  const currentState = context.hooks.state.get(path);
-  if (!currentState) return; // 이미 다른 컴포넌트가 가져갔으면 삭제 금지
-  context.hooks.state.delete(path);
-  context.hooks.cursor.delete(path);
-}
-
-/**
- * 기존 deleteComponent (즉시 삭제)
- */
 export const deleteComponent = (path: string) => {
   context.hooks.state.delete(path);
   context.hooks.cursor.delete(path);
@@ -73,13 +60,14 @@ export const cleanupUnusedHooks = () => {
   });
 };
 
-// --- useState 구현 ---
+// --- useState ---
 export const useState = <T>(initialValue: T | (() => T)): [T, (nextValue: T | ((prev: T) => T)) => void] => {
   const path = context.hooks.currentPath;
   const cursor = context.hooks.currentCursor;
   const hooks = context.hooks.currentHooks as Hook[];
 
   let hook = hooks[cursor] as StateHook<unknown> | undefined;
+
   if (!hook) {
     const value = typeof initialValue === "function" ? (initialValue as () => T)() : initialValue;
     hook = { kind: "state", value };
@@ -101,7 +89,7 @@ export const useState = <T>(initialValue: T | (() => T)): [T, (nextValue: T | ((
   return [hook.value as T, setState];
 };
 
-// --- useEffect 구현 ---
+// --- useEffect ---
 export const useEffect = (effect: () => (() => void) | void, deps?: unknown[]): void => {
   const path = context.hooks.currentPath;
   const cursor = context.hooks.currentCursor;
@@ -109,6 +97,7 @@ export const useEffect = (effect: () => (() => void) | void, deps?: unknown[]): 
   const oldHook = hooks[cursor] as EffectHook | undefined;
 
   let shouldRun = false;
+
   if (deps === undefined) {
     shouldRun = true;
   } else if (!oldHook) {
@@ -127,7 +116,7 @@ export const useEffect = (effect: () => (() => void) | void, deps?: unknown[]): 
 
   if (shouldRun) {
     context.effects.queue.push({ path, cursor });
-    enqueueEffects();
+    enqueueEffects(); // [핵심] 여기서 비동기 실행 예약
   }
 
   context.hooks.cursor.set(path, cursor + 1);

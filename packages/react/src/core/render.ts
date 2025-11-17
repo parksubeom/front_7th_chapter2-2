@@ -1,22 +1,25 @@
 // core/render.ts
 import { context, resetHookContext } from "./context";
 import { reconcile } from "./reconciler";
-// [Stability] 'hooks.ts'가 아직 없으므로, 임시 스텁(stub) 함수를 정의합니다.
-const cleanupUnusedHooks = () => {};
+import { cleanupUnusedHooks } from "./hooks";
 import { withEnqueue } from "../utils";
 
 export const render = (): void => {
-  resetHookContext(); // 1. 훅 컨텍스트 초기화
-  // 2. reconcile 함수 호출 (5개 인자 전달)
-  const newInstance = reconcile(
-    context.root.container!,
-    context.root.instance,
-    context.root.node,
-    "0", // 루트 경로
-    null, // 루트 anchor
-  );
-  context.root.instance = newInstance; // 새 인스턴스 저장
-  cleanupUnusedHooks(); // 3. 훅 정리 (스텁)
+  // 1. 훅 컨텍스트 초기화
+  resetHookContext();
+
+  // 2. reconcile 함수 호출
+  const newInstance = reconcile(context.root.container!, context.root.instance, context.root.node, "0", null);
+
+  // 3. 새 인스턴스 저장
+  context.root.instance = newInstance;
+
+  // 4. 훅 정리
+  cleanupUnusedHooks();
+
+  // [FIX] enqueueEffects() 호출 제거
+  // useEffect 내부에서 이미 스케줄링하므로 여기서는 호출하지 않습니다.
+  // 이로써 render.ts -> hooks.ts 의존성을 줄이고 순환 참조를 예방합니다.
 };
 
 export const enqueueRender = withEnqueue(render);
