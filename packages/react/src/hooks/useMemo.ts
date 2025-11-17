@@ -1,5 +1,5 @@
 import { DependencyList } from "./types";
-import { useRef } from "./useRef";
+import { useState } from "../core";
 import { shallowEquals } from "../utils";
 
 /**
@@ -12,17 +12,18 @@ import { shallowEquals } from "../utils";
  * @returns 메모이제이션된 값
  */
 export const useMemo = <T>(factory: () => T, deps: DependencyList, equals = shallowEquals): T => {
-  const cacheRef = useRef<{
+  const [cache] = useState<{
     deps: DependencyList;
     value: T;
-  } | null>(null);
+  }>(() => ({
+    deps,
+    value: factory(),
+  }));
 
-  if (!cacheRef.current || !equals(cacheRef.current.deps, deps)) {
-    cacheRef.current = {
-      deps,
-      value: factory(),
-    };
+  if (!equals(cache.deps, deps)) {
+    cache.deps = deps;
+    cache.value = factory();
   }
 
-  return cacheRef.current.value;
+  return cache.value;
 };

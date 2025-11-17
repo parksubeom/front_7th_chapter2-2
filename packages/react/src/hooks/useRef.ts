@@ -7,6 +7,7 @@ import { useState } from "../core";
  * @param initialValue - ref 객체의 초기 .current 값
  * @returns `{ current: T }` 형태의 ref 객체
  */
+//state 말고 ref 객체를 따로 만들면 더 가벼울려나 ? 일단 통과하고 해보자
 export const useRef = <T>(initialValue: T): { current: T } => {
   const [ref] = useState<{ current: T }>(() => ({
     current: initialValue,
