@@ -156,6 +156,11 @@ function unmount(parentDom: HTMLElement, instance: Instance | null, skipStateDel
 
 // --- Reconcile Children (With Explicit Collision Guard) ---
 
+type HookBucket = {
+  hooks: unknown[];
+  cursor?: number;
+};
+
 function reconcileChildren(
   parentDom: HTMLElement,
   instance: Instance,
@@ -168,6 +173,46 @@ function reconcileChildren(
 
   const keyedOldMap = new Map<string, Instance>();
   const unkeyedOldList: Instance[] = [];
+  const pathToOldInstance = new Map<string, Instance>();
+  const orphanedHooks = new Map<string, HookBucket>();
+
+  const stashHookBucket = (targetPath: string) => {
+    const hooks = context.hooks.state.get(targetPath);
+    const cursor = context.hooks.cursor.get(targetPath);
+    if (!hooks && cursor === undefined) {
+      return;
+    }
+    orphanedHooks.set(targetPath, {
+      hooks: hooks ?? [],
+      cursor,
+    });
+    context.hooks.state.delete(targetPath);
+    if (cursor !== undefined) {
+      context.hooks.cursor.delete(targetPath);
+    }
+  };
+
+  const takeHookBucket = (targetPath: string): HookBucket | undefined => {
+    const cached = orphanedHooks.get(targetPath);
+    if (cached) {
+      orphanedHooks.delete(targetPath);
+      return cached;
+    }
+
+    const hooks = context.hooks.state.get(targetPath);
+    const cursor = context.hooks.cursor.get(targetPath);
+    if (hooks || cursor !== undefined) {
+      context.hooks.state.delete(targetPath);
+      if (cursor !== undefined) {
+        context.hooks.cursor.delete(targetPath);
+      }
+      return {
+        hooks: hooks ?? [],
+        cursor,
+      };
+    }
+    return undefined;
+  };
 
   for (const oldChild of oldChildren) {
     if (!oldChild) continue;
@@ -176,6 +221,7 @@ function reconcileChildren(
     } else {
       unkeyedOldList.push(oldChild);
     }
+    pathToOldInstance.set(oldChild.path, oldChild);
   }
 
   let lastPlacedDom: Node | null = null;
@@ -200,21 +246,22 @@ function reconcileChildren(
 
     // 2. Path & Anchor
     const childPath = createChildPath(path, newVNode.key ?? null, i);
+    const ownerOfPath = pathToOldInstance.get(childPath);
+    if (ownerOfPath && ownerOfPath !== oldInstance) {
+      stashHookBucket(childPath);
+    }
+
     const effectiveAnchorSource = lastPlacedDom ? lastPlacedDom.nextSibling : startAnchor;
     const anchor = getNextUsableAnchor(effectiveAnchorSource);
 
     // 3. State Transfer
     if (oldInstance && oldInstance.path !== childPath) {
-      const oldState = context.hooks.state.get(oldInstance.path);
-      const oldCursor = context.hooks.cursor.get(oldInstance.path);
-
-      if (oldState) {
-        context.hooks.state.set(childPath, oldState);
-        context.hooks.state.delete(oldInstance.path);
+      const preserved = takeHookBucket(oldInstance.path);
+      if (preserved?.hooks) {
+        context.hooks.state.set(childPath, preserved.hooks);
       }
-      if (oldCursor !== undefined) {
-        context.hooks.cursor.set(childPath, oldCursor);
-        context.hooks.cursor.delete(oldInstance.path);
+      if (preserved && preserved.cursor !== undefined) {
+        context.hooks.cursor.set(childPath, preserved.cursor);
       }
       oldInstance.path = childPath;
     }
