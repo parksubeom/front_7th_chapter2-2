@@ -21,6 +21,7 @@ export interface Instance {
   children: (Instance | null)[];
   key: string | null;
   path: string;
+  memoizedProps?: Record<string, unknown> | null;
 }
 
 export interface EffectHook {

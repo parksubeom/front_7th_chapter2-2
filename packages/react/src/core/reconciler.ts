@@ -6,6 +6,13 @@ import { getFirstDom, insertInstance, removeInstance, setDomProps, updateDomProp
 import { createChildPath } from "./elements";
 import { cleanupEffects, deleteComponent } from "./hooks";
 
+type MemoizedComponentType = React.ComponentType & {
+  __memoConfig?: {
+    equals: (prevProps: Record<string, unknown>, nextProps: Record<string, unknown>) => boolean;
+    render: React.ComponentType;
+  };
+};
+
 function getNextUsableAnchor(node: Node | null): HTMLElement | Text | null {
   if (node === null) return null;
   if (node.nodeType === Node.ELEMENT_NODE || node.nodeType === Node.TEXT_NODE) {
@@ -31,8 +38,10 @@ function mountComponent(
   anchor: HTMLElement | Text | null,
 ): Instance {
   enterComponent(path);
-  const Component = node.type as React.ComponentType;
-  const childNode = Component(node.props);
+  const Component = node.type as MemoizedComponentType;
+  const memoConfig = Component.__memoConfig;
+  const renderFn = (memoConfig?.render as React.ComponentType) ?? Component;
+  const childNode = renderFn(node.props);
   exitComponent();
 
   const instance: Instance = {
@@ -42,6 +51,7 @@ function mountComponent(
     path,
     kind: NodeTypes.COMPONENT,
     key: node.key,
+    memoizedProps: memoConfig ? (node.props as Record<string, unknown>) : null,
   };
 
   const childInstance = reconcile(parentDom, null, childNode, path, anchor);
@@ -107,8 +117,21 @@ function updateComponent(
   anchor: HTMLElement | Text | null,
 ): Instance {
   enterComponent(path);
-  const Component = node.type as React.ComponentType;
-  const childNode = Component(node.props);
+  const Component = node.type as MemoizedComponentType;
+  const memoConfig = Component.__memoConfig;
+
+  if (
+    memoConfig &&
+    instance.memoizedProps &&
+    memoConfig.equals(instance.memoizedProps, node.props as Record<string, unknown>)
+  ) {
+    instance.node = node;
+    exitComponent();
+    return instance;
+  }
+
+  const renderFn = (memoConfig?.render as React.ComponentType) ?? Component;
+  const childNode = renderFn(node.props);
   exitComponent();
 
   const oldChildInstance = instance.children[0];
@@ -117,6 +140,7 @@ function updateComponent(
   instance.node = node;
   instance.children = [newChildInstance];
   instance.dom = getFirstDom(newChildInstance);
+  instance.memoizedProps = memoConfig ? (node.props as Record<string, unknown>) : null;
   return instance;
 }
 
