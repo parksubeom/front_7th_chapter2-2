@@ -127,15 +127,31 @@ export const insertInstance = (
 ): void => {
   if (!instance) return;
   const domNodes = getDomNodes(instance);
+
   domNodes.forEach((dom) => {
-    parentDom.insertBefore(dom, anchor);
+    // [FIX] anchor가 존재하고, parentDom의 자식이 아닌 경우 anchor를 무시(null)합니다.
+    // 이렇게 하면 insertBefore가 아닌 appendChild처럼 동작하여 크래시를 막고,
+    // 최소한 DOM 트리에 노드가 추가되도록 보장합니다.
+    let validAnchor = anchor;
+    if (anchor && anchor.parentNode !== parentDom) {
+      validAnchor = null;
+    }
+
+    parentDom.insertBefore(dom, validAnchor);
   });
 };
 
-export const removeInstance = (parentDom: HTMLElement, instance: Instance | null): void => {
+export const removeInstance = (
+  _parentDom: HTMLElement, // 더 이상 사용하지 않음 (안정성 위해 무시)
+  instance: Instance | null,
+): void => {
   if (!instance) return;
   const domNodes = getDomNodes(instance);
+
   domNodes.forEach((dom) => {
-    parentDom.removeChild(dom);
+    // [FIX] 실제 부모 노드가 존재할 때만 제거를 시도합니다.
+    if (dom.parentNode) {
+      dom.parentNode.removeChild(dom);
+    }
   });
 };

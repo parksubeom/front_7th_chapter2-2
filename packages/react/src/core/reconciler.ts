@@ -1,21 +1,23 @@
-// core/reconciler.ts (v12 - Stable and Type-Guarded)
-import { enterComponent, exitComponent } from "./context";
+// core/reconciler.ts (v18)
+import { context, enterComponent, exitComponent } from "./context";
 import { Fragment, NodeTypes, TEXT_ELEMENT, NodeType } from "./constants";
 import { Instance, VNode } from "./types";
 import { getFirstDom, insertInstance, removeInstance, setDomProps, updateDomProps } from "./dom";
 import { createChildPath } from "./elements";
-import { cleanupEffects } from "./hooks";
+import { cleanupEffects, deleteComponentSafe } from "./hooks";
 
-/**
- * [FIX 2 - Helper] 주어진 노드가 유효한 DOM 노드(Element 또는 Text)인지 확인합니다.
- */
-function isDomNode(node: Node | null): node is HTMLElement | Text {
-  return node !== null && (node.nodeType === Node.ELEMENT_NODE || node.nodeType === Node.TEXT_NODE);
+function getNextUsableAnchor(node: Node | null): HTMLElement | Text | null {
+  if (node === null) return null;
+  if (node.nodeType === Node.ELEMENT_NODE || node.nodeType === Node.TEXT_NODE) {
+    return node as HTMLElement | Text;
+  }
+  return getNextUsableAnchor(node.nextSibling);
 }
 
-/**
- * VNode의 type을 NodeType (string)으로 변환합니다.
- */
+/*function isDomNode(node: Node | null): node is HTMLElement | Text {
+  return node !== null && (node.nodeType === Node.ELEMENT_NODE || node.nodeType === Node.TEXT_NODE);
+}*/
+
 function getNodeType(type: VNode["type"]): NodeType {
   if (typeof type === "string") return NodeTypes.HOST;
   if (type === TEXT_ELEMENT) return NodeTypes.TEXT;
@@ -24,12 +26,8 @@ function getNodeType(type: VNode["type"]): NodeType {
   throw new Error(`Unknown VNode type: ${String(type)}`);
 }
 
-// --- (상호 재귀 함수 선언 - Hoisting을 위해 function 사용) ---
-// [FIX 1] function 선언을 사용하여 ts(2552) 에러를 제거합니다.
+// --- Mount / Update 통합 ---
 
-/**
- * 컴포넌트 VNode를 마운트합니다.
- */
 function mountComponent(
   parentDom: HTMLElement,
   node: VNode,
@@ -56,9 +54,6 @@ function mountComponent(
   return instance;
 }
 
-/**
- * DOM/Text VNode를 마운트합니다.
- */
 function mountHost(parentDom: HTMLElement, node: VNode, path: string, anchor: HTMLElement | Text | null): Instance {
   let dom: HTMLElement | Text;
   if (node.type === TEXT_ELEMENT) {
@@ -82,9 +77,6 @@ function mountHost(parentDom: HTMLElement, node: VNode, path: string, anchor: HT
   return instance;
 }
 
-/**
- * Fragment VNode를 마운트합니다.
- */
 function mountFragment(parentDom: HTMLElement, node: VNode, path: string, anchor: HTMLElement | Text | null): Instance {
   const instance: Instance = {
     node,
@@ -99,9 +91,6 @@ function mountFragment(parentDom: HTMLElement, node: VNode, path: string, anchor
   return instance;
 }
 
-/**
- * VNode 타입에 따라 적절한 mount 함수를 호출하는 라우터입니다.
- */
 function mount(parentDom: HTMLElement, node: VNode, path: string, anchor: HTMLElement | Text | null): Instance {
   const nodeType = getNodeType(node.type);
   switch (nodeType) {
@@ -117,7 +106,7 @@ function mount(parentDom: HTMLElement, node: VNode, path: string, anchor: HTMLEl
   }
 }
 
-// --- Update (기존 인스턴스 변경) ---
+// --- Update ---
 
 function updateComponent(
   parentDom: HTMLElement,
@@ -133,6 +122,7 @@ function updateComponent(
 
   const oldChildInstance = instance.children[0];
   const newChildInstance = reconcile(parentDom, oldChildInstance, childNode, path, anchor);
+
   instance.node = node;
   instance.children = [newChildInstance];
   instance.dom = getFirstDom(newChildInstance);
@@ -148,26 +138,33 @@ function updateHost(parentDom: HTMLElement, instance: Instance, node: VNode, pat
 
 function updateFragment(parentDom: HTMLElement, instance: Instance, node: VNode, path: string): Instance {
   instance.node = node;
-  instance.children = reconcileChildren(parentDom, instance, node.props.children || [], path, getFirstDom(instance));
+  const startAnchor = getFirstDom(instance) || null;
+  instance.children = reconcileChildren(parentDom, instance, node.props.children || [], path, startAnchor);
   return instance;
 }
 
-// --- Unmount (제거) ---
+// --- Unmount ---
 
 function unmount(parentDom: HTMLElement, instance: Instance | null): void {
   if (!instance) return;
+
+  // DOM 제거는 항상
   removeInstance(parentDom, instance);
+
+  // Effect cleanup
   cleanupEffects(instance.path);
+
+  // 상태 삭제는 path 존재 시 안전하게
+  if (instance.path) deleteComponentSafe(instance.path);
+
+  // 자식 unmount
   if (instance.children) {
     instance.children.forEach((child) => unmount(parentDom, child));
   }
 }
 
-// --- 자식 재조정 (Diffing) ---
+// --- Reconcile Children (Strict Matching & State Transfer) ---
 
-/**
- * 자식 VNode 배열과 이전 인스턴스 배열을 비교하여 재조정합니다.
- */
 function reconcileChildren(
   parentDom: HTMLElement,
   instance: Instance,
@@ -178,95 +175,116 @@ function reconcileChildren(
   const oldChildren = instance.children || [];
   const newInstances: (Instance | null)[] = new Array(children.length).fill(null);
 
-  const oldKeyMap = new Map<string, Instance>();
+  const keyedOldMap = new Map<string, Instance>();
+  const unkeyedOldList: Instance[] = [];
+
   for (const oldChild of oldChildren) {
     if (!oldChild) continue;
-    const mapKey = oldChild.key !== null ? oldChild.key : `__index_${oldKeyMap.size}`;
-    oldKeyMap.set(mapKey, oldChild);
+    if (oldChild.key !== null) {
+      keyedOldMap.set(oldChild.key, oldChild);
+    } else {
+      unkeyedOldList.push(oldChild);
+    }
   }
 
-  let lastPlacedDom: Node | null = null; // Node 대신 ChildNode 사용을 방지합니다.
+  let lastPlacedDom: Node | null = null;
 
   for (let i = 0; i < children.length; i++) {
     const newVNode = children[i];
     if (!newVNode) continue;
 
-    const mapKey = newVNode.key !== null ? newVNode.key : `__index_${i}`;
-    const oldInstance = oldKeyMap.get(mapKey);
-    const childPath = createChildPath(path, newVNode.key ?? null, i);
+    let oldInstance: Instance | undefined;
 
-    // 1. [FIX 2] Anchor 계산: lastPlacedDom.nextSibling의 타입을 보호합니다.
-    const nextSibling = lastPlacedDom ? lastPlacedDom.nextSibling : startAnchor;
-    let anchor: HTMLElement | Text | null = null;
-
-    if (isDomNode(nextSibling)) {
-      // ChildNode가 HTMLElement 또는 Text인지 확인
-      anchor = nextSibling;
-    } else if (nextSibling === null) {
-      anchor = null; // 다음 형제가 없으면 anchor도 null
+    // 1. Match Finding
+    if (newVNode.key !== null) {
+      oldInstance = keyedOldMap.get(newVNode.key);
+      if (oldInstance) keyedOldMap.delete(newVNode.key);
     } else {
-      // Comment 노드나 다른 타입을 건너뛰고 유효한 DOM 노드를 찾을 수도 있지만,
-      // 현재 로직상 nextSibling이 null이 아니면 anchor가 되어야 하므로,
-      // startAnchor가 ChildNode 타입인 경우에 대비하여 명시적으로 캐스팅합니다.
-      /* eslint-disable @typescript-eslint/no-unused-vars */
-      anchor = startAnchor;
+      // Strict Type Matching
+      const matchIndex = unkeyedOldList.findIndex((old) => old.node.type === newVNode.type);
+      if (matchIndex !== -1) {
+        oldInstance = unkeyedOldList[matchIndex];
+        unkeyedOldList.splice(matchIndex, 1);
+      }
     }
 
-    // [Simplified Anchor Logic]
-    // Anchor는 lastPlacedDom의 다음 노드이거나, 목록 시작점인 startAnchor입니다.
-    const currentAnchor = lastPlacedDom ? lastPlacedDom.nextSibling : startAnchor;
+    // 2. Path & Anchor
+    const childPath = createChildPath(path, newVNode.key ?? null, i);
+    const effectiveAnchorSource = lastPlacedDom ? lastPlacedDom.nextSibling : startAnchor;
+    const anchor = getNextUsableAnchor(effectiveAnchorSource);
 
-    const newInstance = reconcile(
-      parentDom,
-      oldInstance || null,
-      newVNode,
-      childPath,
-      isDomNode(currentAnchor) ? currentAnchor : null, // [FIX 2] ChildNode 타입 에러 방지
-    );
+    // 3. State Transfer with Safety
+    if (oldInstance && oldInstance.path !== childPath) {
+      const oldState = context.hooks.state.get(oldInstance.path);
+      const oldCursor = context.hooks.cursor.get(oldInstance.path);
+
+      if (oldState) {
+        context.hooks.state.set(childPath, oldState);
+        context.hooks.state.delete(oldInstance.path);
+      }
+      if (oldCursor !== undefined) {
+        context.hooks.cursor.set(childPath, oldCursor);
+        context.hooks.cursor.delete(oldInstance.path);
+      }
+
+      // oldInstance.path 업데이트
+      oldInstance.path = childPath;
+
+      // ⚠ displacedInstance.path=null 제거 → DOM 삭제 보장
+    }
+
+    const newInstance = reconcile(parentDom, oldInstance || null, newVNode, childPath, anchor);
 
     if (newInstance) {
       newInstances[i] = newInstance;
-
       const newDom = getFirstDom(newInstance);
       if (newDom) {
-        // 2. [Placement Logic] DOM 위치 확인 및 이동/삽입 (movement logic)
+        // DOM Placement
         if (!oldInstance || newDom.previousSibling !== lastPlacedDom) {
-          insertInstance(parentDom, newInstance, currentAnchor as HTMLElement | Text | null);
+          insertInstance(parentDom, newInstance, anchor);
         }
         lastPlacedDom = newDom;
       }
-      if (oldInstance) oldKeyMap.delete(mapKey);
     }
   }
 
-  oldKeyMap.forEach((child) => unmount(parentDom, child));
+  // 삭제 처리 시 안전하게 deleteComponentSafe 사용
+  keyedOldMap.forEach((child) => {
+    if (child.path !== null) unmount(parentDom, child);
+  });
+  unkeyedOldList.forEach((child) => {
+    if (child.path !== null) unmount(parentDom, child);
+  });
+
   return newInstances;
 }
 
-// --- 메인 Reconcile 함수 ---
+// --- Main Reconcile ---
 export function reconcile(
   parentDom: HTMLElement,
   instance: Instance | null,
   node: VNode | null,
   path: string,
-  anchor: HTMLElement | Text | null = null,
+
+  _anchor: HTMLElement | Text | null = null,
 ): Instance | null {
   if (node === null) {
     unmount(parentDom, instance);
     return null;
   }
   if (instance === null) {
-    return mount(parentDom, node, path, anchor);
+    return mount(parentDom, node, path, _anchor);
   }
-  if (instance.kind !== getNodeType(node.type) || instance.key !== node.key) {
+  // [FIX] node.type 자체가 변경되었는지 확인하여 컴포넌트 교체를 감지합니다.
+  if (instance.key !== node.key || instance.node.type !== node.type) {
     unmount(parentDom, instance);
-    return mount(parentDom, node, path, anchor);
+    return mount(parentDom, node, path, _anchor);
   }
 
   const nodeType = getNodeType(node.type);
   switch (nodeType) {
     case NodeTypes.COMPONENT:
-      return updateComponent(parentDom, instance, node, path, anchor);
+      return updateComponent(parentDom, instance, node, path, _anchor);
     case NodeTypes.HOST:
     case NodeTypes.TEXT:
       return updateHost(parentDom, instance, node, path);
