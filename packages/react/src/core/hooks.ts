@@ -66,12 +66,16 @@ export const useState = <T>(initialValue: T | (() => T)): [T, (nextValue: T | ((
   const cursor = context.hooks.currentCursor;
   const hooks = context.hooks.currentHooks as Hook[];
 
-  let hook = hooks[cursor] as StateHook<unknown> | undefined;
+  let hook = hooks[cursor] as Hook | undefined;
 
   if (!hook) {
     const value = typeof initialValue === "function" ? (initialValue as () => T)() : initialValue;
     hook = { kind: "state", value };
     hooks.push(hook);
+  } else if (hook.kind !== "state") {
+    const value = typeof initialValue === "function" ? (initialValue as () => T)() : initialValue;
+    hook = { kind: "state", value };
+    hooks[cursor] = hook;
   }
 
   const setState = (nextValue: T | ((prev: T) => T)) => {
@@ -86,7 +90,7 @@ export const useState = <T>(initialValue: T | (() => T)): [T, (nextValue: T | ((
   };
 
   context.hooks.cursor.set(path, cursor + 1);
-  return [hook.value as T, setState];
+  return [(hook as StateHook<T>).value, setState];
 };
 
 // --- useEffect ---

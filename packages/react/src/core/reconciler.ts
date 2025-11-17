@@ -331,7 +331,7 @@ export function reconcile(
 
   _anchor: HTMLElement | Text | null = null,
 ): Instance | null {
-  if (node === null) {
+  if (node == null || typeof node !== "object" || !("type" in node)) {
     unmount(parentDom, instance);
     return null;
   }
