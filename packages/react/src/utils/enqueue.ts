@@ -29,6 +29,7 @@ export const withEnqueue = (fn: AnyFunction) => {
       return;
     }
     scheduled = true;
+    console.log("Adding task to microtask queue");
     enqueue(run);
   };
 };

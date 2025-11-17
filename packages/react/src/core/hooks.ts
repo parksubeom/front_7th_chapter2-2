@@ -2,8 +2,8 @@
 import { shallowEquals, withEnqueue } from "../utils";
 import { context } from "./context";
 import { EffectHook } from "./types";
-import { enqueueRender } from "./render";
 import { HookTypes } from "./constants";
+import * as RenderModule from "./render"; // (추가)
 
 interface StateHook<T> {
   kind: "state";
@@ -86,11 +86,14 @@ export const useState = <T>(initialValue: T | (() => T)): [T, (nextValue: T | ((
     if (Object.is(oldValue, newValue)) return;
 
     currentHook.value = newValue;
-    enqueueRender();
+
+    // [FIX] 모듈의 함수를 지연 호출하여 순환 참조 문제 회피
+    // 모듈이 완전히 로딩된 시점(이벤트 발생 시)에 호출되므로 안전합니다.
+    RenderModule.enqueueRender();
   };
 
   context.hooks.cursor.set(path, cursor + 1);
-  return [(hook as StateHook<T>).value, setState];
+  return [hook.value as T, setState];
 };
 
 // --- useEffect ---

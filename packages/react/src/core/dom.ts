@@ -4,7 +4,6 @@ import { NodeTypes } from "./constants";
 import { Instance } from "./types";
 
 // --- Prop 처리 ---
-// (isEvent, isStyle, isClassName, isProperty, isGone, isNew, setDomProps는 v4와 동일)
 const isEvent = (key: string) => key.startsWith("on");
 const isStyle = (key: string) => key === "style";
 const isClassName = (key: string) => key === "className";
@@ -23,9 +22,13 @@ export const updateDomProps = (
   prevProps: Record<string, any> = {},
   nextProps: Record<string, any> = {},
 ): void => {
-  // [FIX] 텍스트 노드 업데이트 로직 추가
+  // [DEBUG] DOM 업데이트 로그
+  // console.log("🔧 [updateDomProps]", dom, prevProps, "->", nextProps);
+
   if (dom.nodeType === Node.TEXT_NODE) {
     if (prevProps.nodeValue !== nextProps.nodeValue) {
+      // [DEBUG] 텍스트 변경 로그
+      console.log(`📝 [TextUpdate] '${prevProps.nodeValue}' -> '${nextProps.nodeValue}'`);
       dom.nodeValue = nextProps.nodeValue;
     }
     return;
@@ -33,7 +36,7 @@ export const updateDomProps = (
 
   const htmlDom = dom as HTMLElement;
 
-  // 1. 이전 속성 제거 (이벤트) - (v4와 동일)
+  // 1. 이전 속성 제거 (이벤트)
   Object.keys(prevProps)
     .filter(isEvent)
     .filter((key) => isGone(nextProps)(key) || isNew(prevProps, nextProps)(key))
@@ -42,7 +45,7 @@ export const updateDomProps = (
       htmlDom.removeEventListener(eventType, prevProps[name]);
     });
 
-  // 2. 이전 속성 제거 (스타일 외) - (v4와 동일)
+  // 2. 이전 속성 제거 (스타일 외)
   Object.keys(prevProps)
     .filter((key) => !isEvent(key) && !isStyle(key) && key !== "children")
     .filter(isGone(nextProps))
@@ -54,7 +57,7 @@ export const updateDomProps = (
       }
     });
 
-  // 3. 스타일 속성 업데이트 (제거 및 변경) - (v4와 동일)
+  // 3. 스타일 속성 업데이트
   const prevStyle = (prevProps.style || {}) as Record<string, string>;
   const nextStyle = (nextProps.style || {}) as Record<string, string>;
   Object.keys(prevStyle)
@@ -68,7 +71,7 @@ export const updateDomProps = (
       (htmlDom.style as any)[name] = nextStyle[name];
     });
 
-  // 4. 새 속성 설정 (이벤트) - (v4와 동일)
+  // 4. 새 속성 설정 (이벤트)
   Object.keys(nextProps)
     .filter(isEvent)
     .filter(isNew(prevProps, nextProps))
@@ -77,11 +80,14 @@ export const updateDomProps = (
       htmlDom.addEventListener(eventType, nextProps[name]);
     });
 
-  // 5. 새 속성 설정 (스타일 외) - (v4와 동일)
+  // 5. 새 속성 설정 (스타일 외)
   Object.keys(nextProps)
     .filter((key) => !isEvent(key) && !isStyle(key) && key !== "children")
     .filter(isNew(prevProps, nextProps))
     .forEach((name) => {
+      // [DEBUG] 속성 변경 로그
+      console.log(`🎨 [PropUpdate] ${name}:`, nextProps[name]);
+
       if (isProperty(name)) {
         (htmlDom as any)[name] = nextProps[name];
       } else {
@@ -91,7 +97,6 @@ export const updateDomProps = (
 };
 
 // --- DOM 탐색 및 조작 ---
-// (v4 - Patched 코드를 사용합니다)
 
 export const getDomNodes = (instance: Instance | null): (HTMLElement | Text)[] => {
   if (!instance) return [];
@@ -129,9 +134,9 @@ export const insertInstance = (
   const domNodes = getDomNodes(instance);
 
   domNodes.forEach((dom) => {
-    // [FIX] anchor가 존재하고, parentDom의 자식이 아닌 경우 anchor를 무시(null)합니다.
-    // 이렇게 하면 insertBefore가 아닌 appendChild처럼 동작하여 크래시를 막고,
-    // 최소한 DOM 트리에 노드가 추가되도록 보장합니다.
+    // [DEBUG] DOM 삽입 로그
+    console.log("➕ [insertInstance]", dom, "into", parentDom);
+
     let validAnchor = anchor;
     if (anchor && anchor.parentNode !== parentDom) {
       validAnchor = null;
@@ -141,15 +146,11 @@ export const insertInstance = (
   });
 };
 
-export const removeInstance = (
-  _parentDom: HTMLElement, // 더 이상 사용하지 않음 (안정성 위해 무시)
-  instance: Instance | null,
-): void => {
+export const removeInstance = (_parentDom: HTMLElement, instance: Instance | null): void => {
   if (!instance) return;
   const domNodes = getDomNodes(instance);
 
   domNodes.forEach((dom) => {
-    // [FIX] 실제 부모 노드가 존재할 때만 제거를 시도합니다.
     if (dom.parentNode) {
       dom.parentNode.removeChild(dom);
     }

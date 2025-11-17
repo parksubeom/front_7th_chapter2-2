@@ -5,21 +5,25 @@ import { cleanupUnusedHooks } from "./hooks";
 import { withEnqueue } from "../utils";
 
 export const render = (): void => {
-  // 1. 훅 컨텍스트 초기화
-  resetHookContext();
+  console.log("렌더 시작된다잉 안되면 안해"); // [DEBUG] 렌더링 시작 확인
 
-  // 2. reconcile 함수 호출
-  const newInstance = reconcile(context.root.container!, context.root.instance, context.root.node, "0", null);
+  try {
+    // 1. 훅 컨텍스트 초기화
+    resetHookContext();
 
-  // 3. 새 인스턴스 저장
-  context.root.instance = newInstance;
+    // 2. reconcile 함수 호출
+    const newInstance = reconcile(context.root.container!, context.root.instance, context.root.node, "0", null);
 
-  // 4. 훅 정리
-  cleanupUnusedHooks();
+    console.log("렌더 되잖아 미친놈아니야", newInstance); // [DEBUG] 리컨실리에이션 결과 확인
 
-  // [FIX] enqueueEffects() 호출 제거
-  // useEffect 내부에서 이미 스케줄링하므로 여기서는 호출하지 않습니다.
-  // 이로써 render.ts -> hooks.ts 의존성을 줄이고 순환 참조를 예방합니다.
+    // 3. 새 인스턴스 저장
+    context.root.instance = newInstance;
+
+    // 4. 훅 정리
+    cleanupUnusedHooks();
+  } catch (e) {
+    console.error("❌ [render] Error:", e); // [DEBUG] 렌더링 중 에러 포착
+  }
 };
 
 export const enqueueRender = withEnqueue(render);
