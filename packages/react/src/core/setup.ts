@@ -20,7 +20,6 @@ export const setup = (rootNode: VNode | null, container: HTMLElement): void => {
   // 0. [FIX] 렌더링 트리거 함수를 명시적으로 설정
   //    모듈 로드 순서 문제를 방지하기 위해 setup 시점에 확실히 설정합니다.
   setRenderTrigger(enqueueRender);
-  console.log("[setup] setRenderTrigger 호출 완료");
 
   // 1. 컨테이너 유효성 검사
   if (!container || typeof container.appendChild !== "function") {

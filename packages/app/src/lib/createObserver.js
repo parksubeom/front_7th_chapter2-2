@@ -2,10 +2,8 @@ export const createObserver = () => {
   const listeners = new Set();
   const subscribe = (fn) => {
     listeners.add(fn);
-    console.log("[createObserver] 구독자 추가, 현재 구독자 수:", listeners.size);
   };
   const notify = () => {
-    console.log("[createObserver] notify 호출, 구독자 수:", listeners.size);
     listeners.forEach((listener) => {
       try {
         listener();
