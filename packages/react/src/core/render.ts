@@ -1,12 +1,11 @@
 // core/render.ts
 import { context, resetHookContext } from "./context";
 import { reconcile } from "./reconciler";
-import { setRenderTrigger, enqueueEffects } from "./hooks";
+import { cleanupUnusedHooks, setRenderTrigger, enqueueEffects } from "./hooks";
 import { withEnqueue } from "../utils";
 
 export const render = (): void => {
   try {
-    console.log("[render] 렌더링 시작");
     // 1. 훅 컨텍스트 초기화
     resetHookContext();
 
@@ -16,21 +15,17 @@ export const render = (): void => {
     // 3. 새 인스턴스 저장
     context.root.instance = newInstance;
 
-    console.log("[render] 렌더링 완료");
+    // 4. 훅 정리
+    cleanupUnusedHooks();
 
-    // 4. [FIX] 렌더링 완료 후 effects 실행 (비동기로 실행)
-    //    useEffect가 큐에 추가한 effects를 실행합니다.
-    //    cleanupUnusedHooks()는 flushEffects() 내부에서 호출됩니다.
-    //    비동기로 실행하여 테스트 요구사항을 만족시킵니다.
+    // 5. 이펙트 실행 예약
     enqueueEffects();
-  } catch (e) {
-    console.error("❌ [render] Error:", e);
+  } catch (error) {
+    console.error("MiniReact: render failed", error);
   }
 };
 
 export const enqueueRender = withEnqueue(render);
 
-// [FIX] 순환 참조 해결: 의존성 주입 패턴
-// render.ts가 로드된 후 hooks.ts에 enqueueRender 함수를 주입합니다.
+// 훅스 모듈에 트리거 주입
 setRenderTrigger(enqueueRender);
-console.log("[render] setRenderTrigger 호출 완료");

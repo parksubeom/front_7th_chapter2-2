@@ -143,7 +143,6 @@ function updateComponent(
   const oldChildInstance = instance.children[0];
   const newChildInstance = reconcile(parentDom, oldChildInstance, childNode, childPath, anchor);
 
-  instance.node = node;
   instance.children = [newChildInstance];
   instance.dom = getFirstDom(newChildInstance);
   instance.memoizedProps = memoConfig ? (node.props as Record<string, unknown>) : null;
