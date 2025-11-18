@@ -54,9 +54,8 @@ export const context: Context = {
 // --- 컨텍스트 헬퍼 함수 ---
 
 export const resetHookContext = (): void => {
-  // [FIX] 렌더링 사이클이 시작될 때 커서 맵을 초기화합니다.
-  // enterComponent가 진입 시점에 0으로 설정하므로, 여기서 완전히 비워도 안전합니다.
-  context.hooks.cursor.clear();
+  // [FIX] 렌더링 사이클이 시작될 때 커서 맵을 초기화하지 않고,
+  // 방문 기록만 초기화하여 각 컴포넌트의 커서 위치를 보존해야 합니다.
   context.hooks.visited.clear();
   context.hooks.componentStack = [];
 };

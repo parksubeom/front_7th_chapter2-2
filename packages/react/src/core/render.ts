@@ -1,29 +1,33 @@
 // core/render.ts
 import { context, resetHookContext } from "./context";
 import { reconcile } from "./reconciler";
-import { cleanupUnusedHooks } from "./hooks";
+// [FIX] enqueueEffects를 hooks에서 확실하게 가져옵니다.
+import { cleanupUnusedHooks, setRenderTrigger, enqueueEffects } from "./hooks";
 import { withEnqueue } from "../utils";
 
 export const render = (): void => {
-  console.log("렌더 시작된다잉 안되면 안해"); // [DEBUG] 렌더링 시작 확인
+  console.log("🔥 [render] Start processing..."); // [DEBUG]
 
-  try {
-    // 1. 훅 컨텍스트 초기화
-    resetHookContext();
+  // 1. 훅 컨텍스트 초기화
+  resetHookContext();
 
-    // 2. reconcile 함수 호출
-    const newInstance = reconcile(context.root.container!, context.root.instance, context.root.node, "0", null);
+  // 2. reconcile 함수 호출
+  const newInstance = reconcile(context.root.container!, context.root.instance, context.root.node, "0", null);
 
-    console.log("렌더 되잖아 미친놈아니야", newInstance); // [DEBUG] 리컨실리에이션 결과 확인
+  // 3. 새 인스턴스 저장
+  context.root.instance = newInstance;
 
-    // 3. 새 인스턴스 저장
-    context.root.instance = newInstance;
+  // 4. 훅 정리
+  cleanupUnusedHooks();
 
-    // 4. 훅 정리
-    cleanupUnusedHooks();
-  } catch (e) {
-    console.error("❌ [render] Error:", e); // [DEBUG] 렌더링 중 에러 포착
-  }
+  // 5. [핵심] 이펙트 실행 트리거
+  // 이 줄이 없으면 useEffect가 절대 실행되지 않습니다!
+  console.log("⚡ [render] Triggering Effects..."); // [DEBUG]
+  enqueueEffects();
 };
 
 export const enqueueRender = withEnqueue(render);
+
+// 훅스 모듈에 트리거 주입
+console.log("🔗 [render] Injecting render trigger..."); // [DEBUG]
+setRenderTrigger(enqueueRender);
