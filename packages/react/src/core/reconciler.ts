@@ -31,6 +31,10 @@ function getNodeType(type: VNode["type"]): NodeType {
 
 // --- Mount / Update (이전과 동일) ---
 
+const getComponentChildPath = (parentPath: string): string => {
+  return `${parentPath}.c0`;
+};
+
 function mountComponent(
   parentDom: HTMLElement,
   node: VNode,
@@ -54,7 +58,8 @@ function mountComponent(
     memoizedProps: memoConfig ? (node.props as Record<string, unknown>) : null,
   };
 
-  const childInstance = reconcile(parentDom, null, childNode, path, anchor);
+  const childPath = getComponentChildPath(path);
+  const childInstance = reconcile(parentDom, null, childNode, childPath, anchor);
   instance.children = [childInstance];
   instance.dom = getFirstDom(childInstance);
   return instance;
@@ -134,8 +139,9 @@ function updateComponent(
   const childNode = renderFn(node.props);
   exitComponent();
 
+  const childPath = getComponentChildPath(path);
   const oldChildInstance = instance.children[0];
-  const newChildInstance = reconcile(parentDom, oldChildInstance, childNode, path, anchor);
+  const newChildInstance = reconcile(parentDom, oldChildInstance, childNode, childPath, anchor);
 
   instance.node = node;
   instance.children = [newChildInstance];

@@ -17,6 +17,8 @@ export const createStore = (reducer, initialState) => {
     const newState = reducer(state, action);
     if (newState !== state) {
       state = newState;
+      // 디버깅: notify 호출 확인
+      console.log("[createStore] State changed, calling notify()");
       notify();
     }
   };

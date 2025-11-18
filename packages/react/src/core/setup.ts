@@ -3,8 +3,8 @@
 import { context } from "./context";
 import { VNode } from "./types";
 // [FIX] hooks.ts의 (스텁) 함수를 임포트해야 합니다.
-import { cleanupUnusedHooks } from "./hooks";
-import { render } from "./render";
+import { cleanupUnusedHooks, setRenderTrigger } from "./hooks";
+import { render, enqueueRender } from "./render";
 
 /**
  * [DELETE]
@@ -17,6 +17,11 @@ import { render } from "./render";
  * Mini-React 애플리케이션의 루트를 설정하고 첫 렌더링을 시작합니다.
  */
 export const setup = (rootNode: VNode | null, container: HTMLElement): void => {
+  // 0. [FIX] 렌더링 트리거 함수를 명시적으로 설정
+  //    모듈 로드 순서 문제를 방지하기 위해 setup 시점에 확실히 설정합니다.
+  setRenderTrigger(enqueueRender);
+  console.log("[setup] setRenderTrigger 호출 완료");
+
   // 1. 컨테이너 유효성 검사
   if (!container || typeof container.appendChild !== "function") {
     throw new Error("MiniReact: 렌더 타깃 컨테이너가 유효하지 않습니다.");

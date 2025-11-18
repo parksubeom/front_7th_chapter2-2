@@ -3,7 +3,13 @@ import { shallowEquals, withEnqueue } from "../utils";
 import { context } from "./context";
 import { EffectHook } from "./types";
 import { HookTypes } from "./constants";
-import * as RenderModule from "./render"; // (추가)
+
+// --- 의존성 주입: 렌더링 트리거 함수 ---
+let triggerRender: (() => void) | null = null;
+
+export const setRenderTrigger = (fn: () => void): void => {
+  triggerRender = fn;
+};
 
 interface StateHook<T> {
   kind: "state";
@@ -13,25 +19,63 @@ type Hook = StateHook<unknown> | EffectHook;
 
 // --- Effect 큐 및 클린업 로직 ---
 
-const flushEffects = () => {
+export const flushEffects = () => {
   const { queue } = context.effects;
   const { state } = context.hooks;
 
+  console.log("[flushEffects] 실행 시작, 큐 크기:", queue.length);
+  console.log("[flushEffects] 현재 hooks state:", Array.from(state.keys()));
   queue.forEach(({ path, cursor }) => {
-    const hook = state.get(path)?.[cursor] as EffectHook | undefined;
+    const hooksForPath = state.get(path);
+    const hookAtCursor = hooksForPath?.[cursor];
+    console.log("[flushEffects] path에 대한 hooks:", {
+      path,
+      cursor,
+      hooksForPathLength: hooksForPath?.length,
+      hookAtCursor,
+      hookKind: hookAtCursor?.kind,
+    });
 
-    if (!hook || hook.kind !== HookTypes.EFFECT) return;
+    const hook = hookAtCursor as EffectHook | undefined;
 
-    if (hook.cleanup) {
-      hook.cleanup();
+    if (!hook || hook.kind !== HookTypes.EFFECT) {
+      console.log("[flushEffects] 훅을 찾을 수 없거나 EFFECT가 아님", { path, cursor, hook, hookKind: hook?.kind });
+      return;
     }
-    const newCleanup = hook.effect();
-    hook.cleanup = typeof newCleanup === "function" ? newCleanup : null;
+
+    console.log("[flushEffects] Effect 실행 시작", {
+      path,
+      cursor,
+      effectFunction: hook.effect.toString().substring(0, 200),
+    });
+    try {
+      if (hook.cleanup) {
+        console.log("[flushEffects] cleanup 실행", { path, cursor });
+        hook.cleanup();
+      }
+      console.log("[flushEffects] effect 함수 호출 전", { path, cursor });
+      const newCleanup = hook.effect();
+      console.log("[flushEffects] effect 함수 호출 후", { path, cursor, hasCleanup: typeof newCleanup === "function" });
+      hook.cleanup = typeof newCleanup === "function" ? newCleanup : null;
+    } catch (error) {
+      console.error("[flushEffects] Effect 실행 중 오류:", error, {
+        path,
+        cursor,
+        errorStack: error instanceof Error ? error.stack : String(error),
+      });
+      // 에러를 다시 throw하지 않고 계속 진행
+      console.warn("[flushEffects] Effect 실행 중 오류가 발생했지만 계속 진행합니다.");
+    }
   });
   queue.length = 0;
+  console.log("[flushEffects] 실행 완료");
+
+  // [FIX] effects 실행 후 cleanup 수행
+  // effects가 실행된 후에 hooks state가 유지된 상태에서 cleanup을 수행합니다.
+  cleanupUnusedHooks();
 };
 
-const enqueueEffects = withEnqueue(flushEffects);
+export const enqueueEffects = withEnqueue(flushEffects);
 
 export const cleanupEffects = (path: string) => {
   const hooks = context.hooks.state.get(path) as Hook[] | undefined;
@@ -83,13 +127,23 @@ export const useState = <T>(initialValue: T | (() => T)): [T, (nextValue: T | ((
     const oldValue = currentHook.value;
     const newValue = typeof nextValue === "function" ? (nextValue as (prev: T) => T)(oldValue) : nextValue;
 
-    if (Object.is(oldValue, newValue)) return;
+    if (Object.is(oldValue, newValue)) {
+      console.log("[useState] setState: 값이 동일하여 리렌더링 스킵", { oldValue, newValue });
+      return;
+    }
 
+    console.log("[useState] setState: 상태 변경 감지", { path, cursor, oldValue, newValue });
     currentHook.value = newValue;
 
-    // [FIX] 모듈의 함수를 지연 호출하여 순환 참조 문제 회피
-    // 모듈이 완전히 로딩된 시점(이벤트 발생 시)에 호출되므로 안전합니다.
-    RenderModule.enqueueRender();
+    // [FIX] 의존성 주입 패턴: 주입받은 렌더링 트리거 함수 호출
+    if (triggerRender) {
+      console.log("[useState] setState: triggerRender 호출");
+      triggerRender();
+    } else {
+      console.warn(
+        "MiniReact: triggerRender가 설정되지 않았습니다. render.ts에서 setRenderTrigger를 호출했는지 확인하세요.",
+      );
+    }
   };
 
   context.hooks.cursor.set(path, cursor + 1);
@@ -121,9 +175,13 @@ export const useEffect = (effect: () => (() => void) | void, deps?: unknown[]): 
   };
   hooks[cursor] = newHook;
 
+  console.log("[useEffect] 등록", { path, cursor, shouldRun, deps });
+
   if (shouldRun) {
     context.effects.queue.push({ path, cursor });
-    enqueueEffects(); // [핵심] 여기서 비동기 실행 예약
+    console.log("[useEffect] 큐에 추가, 큐 크기:", context.effects.queue.length);
+    // [FIX] enqueueEffects()는 render() 완료 후에 호출되도록 변경
+    // useEffect가 호출되는 시점에는 큐에만 추가하고, render() 완료 후에 실행합니다.
   }
 
   context.hooks.cursor.set(path, cursor + 1);

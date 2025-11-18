@@ -22,13 +22,8 @@ export const updateDomProps = (
   prevProps: Record<string, any> = {},
   nextProps: Record<string, any> = {},
 ): void => {
-  // [DEBUG] DOM 업데이트 로그
-  // console.log("🔧 [updateDomProps]", dom, prevProps, "->", nextProps);
-
   if (dom.nodeType === Node.TEXT_NODE) {
     if (prevProps.nodeValue !== nextProps.nodeValue) {
-      // [DEBUG] 텍스트 변경 로그
-      console.log(`📝 [TextUpdate] '${prevProps.nodeValue}' -> '${nextProps.nodeValue}'`);
       dom.nodeValue = nextProps.nodeValue;
     }
     return;
@@ -85,9 +80,6 @@ export const updateDomProps = (
     .filter((key) => !isEvent(key) && !isStyle(key) && key !== "children")
     .filter(isNew(prevProps, nextProps))
     .forEach((name) => {
-      // [DEBUG] 속성 변경 로그
-      console.log(`🎨 [PropUpdate] ${name}:`, nextProps[name]);
-
       if (isProperty(name)) {
         (htmlDom as any)[name] = nextProps[name];
       } else {
@@ -134,9 +126,6 @@ export const insertInstance = (
   const domNodes = getDomNodes(instance);
 
   domNodes.forEach((dom) => {
-    // [DEBUG] DOM 삽입 로그
-    console.log("➕ [insertInstance]", dom, "into", parentDom);
-
     let validAnchor = anchor;
     if (anchor && anchor.parentNode !== parentDom) {
       validAnchor = null;
