@@ -6,8 +6,6 @@ import { cleanupUnusedHooks, setRenderTrigger, enqueueEffects } from "./hooks";
 import { withEnqueue } from "../utils";
 
 export const render = (): void => {
-  console.log("🔥 [render] Start processing..."); // [DEBUG]
-
   // 1. 훅 컨텍스트 초기화
   resetHookContext();
 
@@ -22,12 +20,10 @@ export const render = (): void => {
 
   // 5. [핵심] 이펙트 실행 트리거
   // 이 줄이 없으면 useEffect가 절대 실행되지 않습니다!
-  console.log("⚡ [render] Triggering Effects..."); // [DEBUG]
   enqueueEffects();
 };
 
 export const enqueueRender = withEnqueue(render);
 
 // 훅스 모듈에 트리거 주입
-console.log("🔗 [render] Injecting render trigger..."); // [DEBUG]
 setRenderTrigger(enqueueRender);

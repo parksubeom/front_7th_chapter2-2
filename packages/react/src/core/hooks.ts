@@ -18,7 +18,6 @@ type Hook = StateHook<unknown> | EffectHook | RefHook<unknown>;
 let triggerRender = () => console.error("❌ [hooks] Trigger not ready!");
 
 export const setRenderTrigger = (trigger: () => void) => {
-  console.log("✅ [hooks] setRenderTrigger: Connected.");
   triggerRender = trigger;
 };
 
@@ -105,7 +104,6 @@ export const useState = <T>(initialValue: T | (() => T)): [T, (nextValue: T | ((
     if (Object.is(oldValue, newValue)) return;
 
     currentHook.value = newValue;
-    console.log(`🔄 [useState] setState called at ${path}. Triggering render...`);
     triggerRender();
   };
 
