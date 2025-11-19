@@ -8,7 +8,12 @@ const isEvent = (key: string) => key.startsWith("on");
 const isStyle = (key: string) => key === "style";
 const isClassName = (key: string) => key === "className";
 const isProperty = (key: string) =>
-  isClassName(key) || key === "checked" || key === "disabled" || key === "readOnly" || key === "value";
+  isClassName(key) ||
+  key === "checked" ||
+  key === "disabled" ||
+  key === "readOnly" ||
+  key === "value" ||
+  key === "selected";
 const isGone = (nextProps: Record<string, any>) => (key: string) => !(key in nextProps);
 const isNew = (prevProps: Record<string, any>, nextProps: Record<string, any>) => (key: string) =>
   prevProps[key] !== nextProps[key];
@@ -46,7 +51,7 @@ export const updateDomProps = (
     .filter(isGone(nextProps))
     .forEach((name) => {
       if (isProperty(name)) {
-        (htmlDom as any)[name] = false;
+        (htmlDom as any)[name] = "";
       } else {
         htmlDom.removeAttribute(name);
       }
