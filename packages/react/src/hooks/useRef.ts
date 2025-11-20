@@ -26,6 +26,15 @@ export const useRef = <T>(initialValue: T): { current: T } => {
     const value = { current: initialValue };
     hook = { kind: "ref", value };
     hooks.push(hook);
+  } else if (hook.kind !== "ref") {
+    console.error(
+      `훅 타입 불일치가 감지되었습니다. (경로: "${path}", 커서: ${cursor})\n` +
+        `예상 타입: "ref", 실제 타입: "${hook.kind}"\n` +
+        `이 오류는 주로 조건문, 반복문, 또는 중첩 함수 내부에서 훅을 호출했을 때 발생합니다.`,
+    );
+    const value = { current: initialValue };
+    hook = { kind: "ref", value };
+    hooks[cursor] = hook;
   }
 
   // 2. 커서 이동
