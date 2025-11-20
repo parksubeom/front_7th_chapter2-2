@@ -1,4 +1,8 @@
-import { useState } from "../core";
+import { context } from "../core/context";
+interface RefHook<T> {
+  kind: "ref";
+  value: { current: T };
+}
 
 /**
  * 리렌더링되어도 변경되지 않는 참조(reference) 객체를 반환합니다.
@@ -9,9 +13,25 @@ import { useState } from "../core";
  */
 //state 말고 ref 객체를 따로 만들면 더 가벼울려나 ? 일단 통과하고 해보자
 export const useRef = <T>(initialValue: T): { current: T } => {
-  const [ref] = useState<{ current: T }>(() => ({
-    current: initialValue,
-  }));
+  const path = context.hooks.currentPath;
+  const cursor = context.hooks.currentCursor;
+  const hooks = context.hooks.currentHooks;
 
-  return ref;
+  // 현재 커서 위치의 훅을 가져옵니다. (타입 캐스팅)
+  let hook = hooks[cursor] as RefHook<T> | undefined;
+
+  // 1. 초기화: 첫 렌더링 시에만 객체를 생성합니다.
+  if (!hook) {
+    // { current: value } 객체 자체를 생성하여 저장합니다.
+    const value = { current: initialValue };
+    hook = { kind: "ref", value };
+    hooks.push(hook);
+  }
+
+  // 2. 커서 이동
+  context.hooks.cursor.set(path, cursor + 1);
+
+  // 3. 저장된 객체 자체를 반환합니다.
+  // 객체 참조(Reference)가 유지되므로, 컴포넌트가 리렌더링되어도 이 객체는 동일합니다.
+  return hook.value;
 };
