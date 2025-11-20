@@ -1,4 +1,4 @@
-// core/reconciler.ts (v21 - Explicit Skip Delete)
+// core/reconciler.ts
 import { context, enterComponent, exitComponent } from "./context";
 import { Fragment, NodeTypes, TEXT_ELEMENT, NodeType } from "./constants";
 import { Instance, VNode } from "./types";
@@ -6,6 +6,7 @@ import { getFirstDom, insertInstance, removeInstance, setDomProps, updateDomProp
 import { createChildPath } from "./elements";
 import { cleanupEffects, deleteComponent } from "./hooks";
 
+// [Advanced] Memoized 컴포넌트 타입 정의 (HOC 최적화용)
 type MemoizedComponentType = React.ComponentType & {
   __memoConfig?: {
     equals: (prevProps: Record<string, unknown>, nextProps: Record<string, unknown>) => boolean;
@@ -13,6 +14,10 @@ type MemoizedComponentType = React.ComponentType & {
   };
 };
 
+/**
+ * 주어진 노드부터 시작하여 실제 DOM에 삽입할 수 있는 유효한 형제 노드(Anchor)를 찾습니다.
+ * (주석 노드나 빈 텍스트 노드 등을 건너뛰고 실제 Element나 Text를 찾음)
+ */
 function getNextUsableAnchor(node: Node | null): HTMLElement | Text | null {
   if (node === null) return null;
   if (node.nodeType === Node.ELEMENT_NODE || node.nodeType === Node.TEXT_NODE) {
@@ -29,12 +34,24 @@ function getNodeType(type: VNode["type"]): NodeType {
   throw new Error(`Unknown VNode type: ${String(type)}`);
 }
 
-// --- Mount / Update (이전과 동일) ---
+// --- Mount / Update 통합 ---
 
+/**
+ * 컴포넌트 자식의 고정된 경로 접미사를 반환합니다.
+ */
 const getComponentChildPath = (parentPath: string): string => {
   return `${parentPath}.c0`;
 };
 
+/**
+ * 함수형 컴포넌트를 최초 렌더링(Mount)합니다.
+ *
+ * 1. Hooks 컨텍스트 진입 (enterComponent)
+ * 2. memo 설정 확인 및 렌더 함수 결정
+ * 3. 컴포넌트 실행 및 자식 VNode 생성
+ * 4. Hooks 컨텍스트 이탈 (exitComponent)
+ * 5. 자식 재귀적 마운트
+ */
 function mountComponent(
   parentDom: HTMLElement,
   node: VNode,
@@ -65,6 +82,9 @@ function mountComponent(
   return instance;
 }
 
+/**
+ * 일반 DOM 요소(div, span 등)를 마운트합니다.
+ */
 function mountHost(parentDom: HTMLElement, node: VNode, path: string, anchor: HTMLElement | Text | null): Instance {
   let dom: HTMLElement | Text;
   if (node.type === TEXT_ELEMENT) {
@@ -86,6 +106,9 @@ function mountHost(parentDom: HTMLElement, node: VNode, path: string, anchor: HT
   return instance;
 }
 
+/**
+ * Fragment를 마운트합니다.
+ */
 function mountFragment(parentDom: HTMLElement, node: VNode, path: string, anchor: HTMLElement | Text | null): Instance {
   const instance: Instance = {
     node,
@@ -99,6 +122,9 @@ function mountFragment(parentDom: HTMLElement, node: VNode, path: string, anchor
   return instance;
 }
 
+/**
+ * VNode 타입에 따라 적절한 Mount 함수를 라우팅합니다.
+ */
 function mount(parentDom: HTMLElement, node: VNode, path: string, anchor: HTMLElement | Text | null): Instance {
   const nodeType = getNodeType(node.type);
   switch (nodeType) {
@@ -114,6 +140,10 @@ function mount(parentDom: HTMLElement, node: VNode, path: string, anchor: HTMLEl
   }
 }
 
+/**
+ * 컴포넌트를 업데이트합니다.
+ * [Optimization] memo HOC가 적용된 경우 props 비교를 통해 렌더링을 건너뜁니다 (Bailout).
+ */
 function updateComponent(
   parentDom: HTMLElement,
   instance: Instance,
@@ -125,6 +155,7 @@ function updateComponent(
   const Component = node.type as MemoizedComponentType;
   const memoConfig = Component.__memoConfig;
 
+  // [Bailout Check] 이전 props와 새 props가 같다면 재사용
   if (
     memoConfig &&
     instance.memoizedProps &&
@@ -163,11 +194,13 @@ function updateFragment(parentDom: HTMLElement, instance: Instance, node: VNode,
   return instance;
 }
 
-// --- Unmount (수정됨) ---
+// --- Unmount ---
 
 /**
- * [FIX] skipStateDelete 옵션 추가
- * true일 경우 DOM만 제거하고 Hook 상태는 유지합니다. (다른 컴포넌트가 그 자리를 차지했을 때 사용)
+ * 인스턴스를 제거하고 Hook 상태를 정리합니다.
+ *
+ * @param skipStateDelete - true일 경우 DOM만 제거하고 Hook 상태(메모리)는 유지합니다.
+ * (다른 컴포넌트가 해당 경로로 이동하여 상태를 이어받아야 할 때 사용됨 - Collision Guard)
  */
 function unmount(parentDom: HTMLElement, instance: Instance | null, skipStateDelete = false): void {
   if (!instance) return;
@@ -183,13 +216,21 @@ function unmount(parentDom: HTMLElement, instance: Instance | null, skipStateDel
   }
 }
 
-// --- Reconcile Children (With Explicit Collision Guard) ---
+// --- Reconcile Children (Core Logic) ---
 
 type HookBucket = {
   hooks: unknown[];
   cursor?: number;
 };
 
+/**
+ * 자식 리스트를 비교하고 업데이트하는 핵심 알고리즘입니다.
+ *
+ * 1. Key 기반 매칭 (재사용성 극대화)
+ * 2. 선제적 퇴거 (Pre-emptive Eviction): 새 컴포넌트가 입주할 자리에 있는 기존 컴포넌트의 상태를 대피시킴
+ * 3. 상태 이동 (State Transfer): 컴포넌트가 이동하면 상태도 따라 이동
+ * 4. 충돌 방지 (Collision Guard): 삭제될 컴포넌트가 새 주인의 상태를 지우지 않도록 보호
+ */
 function reconcileChildren(
   parentDom: HTMLElement,
   instance: Instance,
@@ -203,8 +244,11 @@ function reconcileChildren(
   const keyedOldMap = new Map<string, Instance>();
   const unkeyedOldList: Instance[] = [];
   const pathToOldInstance = new Map<string, Instance>();
+
+  // 임시 상태 보관소 (Eviction용)
   const orphanedHooks = new Map<string, HookBucket>();
 
+  // --- Helper: 상태 대피 (Eviction) ---
   const stashHookBucket = (targetPath: string) => {
     const hooks = context.hooks.state.get(targetPath);
     const cursor = context.hooks.cursor.get(targetPath);
@@ -221,6 +265,7 @@ function reconcileChildren(
     }
   };
 
+  // --- Helper: 상태 복구 (Restoration) ---
   const takeHookBucket = (targetPath: string): HookBucket | undefined => {
     const cached = orphanedHooks.get(targetPath);
     if (cached) {
@@ -243,6 +288,7 @@ function reconcileChildren(
     return undefined;
   };
 
+  // 1. Old Children 분류
   for (const oldChild of oldChildren) {
     if (!oldChild) continue;
     if (oldChild.key !== null) {
@@ -255,13 +301,14 @@ function reconcileChildren(
 
   let lastPlacedDom: Node | null = null;
 
+  // 2. New Children 순회
   for (let i = 0; i < children.length; i++) {
     const newVNode = children[i];
     if (!newVNode) continue;
 
     let oldInstance: Instance | undefined;
 
-    // 1. Match Finding
+    // A. 매칭 (Match Finding)
     if (newVNode.key !== null) {
       oldInstance = keyedOldMap.get(newVNode.key);
       if (oldInstance) keyedOldMap.delete(newVNode.key);
@@ -273,17 +320,20 @@ function reconcileChildren(
       }
     }
 
-    // 2. Path & Anchor
     const childPath = createChildPath(path, newVNode.key ?? null, i);
+
+    // B. [Pre-emptive Eviction] 내가 가려는 경로에 이미 다른 인스턴스가 살고 있다면?
+    // 그 인스턴스(ownerOfPath)가 '나'가 아니라면, 그 녀석의 짐을 미리 치워줍니다.
     const ownerOfPath = pathToOldInstance.get(childPath);
     if (ownerOfPath && ownerOfPath !== oldInstance) {
       stashHookBucket(childPath);
     }
 
+    // C. Anchor 계산
     const effectiveAnchorSource = lastPlacedDom ? lastPlacedDom.nextSibling : startAnchor;
     const anchor = getNextUsableAnchor(effectiveAnchorSource);
 
-    // 3. State Transfer
+    // D. State Transfer (이사)
     if (oldInstance && oldInstance.path !== childPath) {
       const preserved = takeHookBucket(oldInstance.path);
       if (preserved?.hooks) {
@@ -295,12 +345,14 @@ function reconcileChildren(
       oldInstance.path = childPath;
     }
 
+    // E. 재귀적 재조정
     const newInstance = reconcile(parentDom, oldInstance || null, newVNode, childPath, anchor);
 
     if (newInstance) {
       newInstances[i] = newInstance;
       const newDom = getFirstDom(newInstance);
       if (newDom) {
+        // F. DOM 위치 조정
         if (!oldInstance || newDom.previousSibling !== lastPlacedDom) {
           insertInstance(parentDom, newInstance, anchor);
         }
@@ -309,31 +361,26 @@ function reconcileChildren(
     }
   }
 
-  // [CRITICAL FIX] Collision Guard with skipStateDelete
-  // 현재 생성된 자식들이 사용하는 Path 목록
+  // 3. 삭제 처리 (Cleanup with Collision Guard)
   const activePaths = new Set(newInstances.map((i) => i?.path));
 
-  // 삭제될 Unkeyed 자식들을 처리
   unkeyedOldList.forEach((oldChild) => {
-    // 만약 삭제될 놈의 Path를 누군가(Footer) 이미 쓰고 있다면?
+    // 삭제될 녀석의 경로를 누군가(새 주인)가 쓰고 있다면, 상태 삭제를 건너뜁니다.
     const shouldSkipDelete = activePaths.has(oldChild.path);
-    // DOM은 지우되, 상태는 지우지 마라! (Footer가 쓰고 있으니까)
     unmount(parentDom, oldChild, shouldSkipDelete);
   });
 
-  // Keyed 자식들은 Path가 고유하므로(key 기반) 충돌 걱정 없이 삭제
   keyedOldMap.forEach((child) => unmount(parentDom, child));
 
   return newInstances;
 }
 
-// --- Main Reconcile (v17과 동일) ---
+// --- Main Reconcile ---
 export function reconcile(
   parentDom: HTMLElement,
   instance: Instance | null,
   node: VNode | null,
   path: string,
-
   _anchor: HTMLElement | Text | null = null,
 ): Instance | null {
   if (node == null || typeof node !== "object" || !("type" in node)) {
