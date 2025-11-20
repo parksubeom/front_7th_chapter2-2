@@ -8,12 +8,8 @@ interface StateHook<T> {
   kind: "state";
   value: T;
 }
-interface RefHook<T> {
-  kind: "ref";
-  value: { current: T };
-}
 
-type Hook = StateHook<unknown> | EffectHook | RefHook<unknown>;
+type Hook = StateHook<unknown> | EffectHook;
 
 let triggerRender: (() => void) | null = null;
 
@@ -86,6 +82,11 @@ export const useState = <T>(initialValue: T | (() => T)): [T, (nextValue: T | ((
     hook = { kind: "state", value };
     hooks.push(hook);
   } else if (hook.kind !== "state") {
+    console.error(
+      `훅 타입 불일치가 감지되었습니다. (경로: "${path}", 커서: ${cursor})\n` +
+        `예상 타입: "state", 실제 타입: "${hook.kind}"\n` +
+        `이 오류는 주로 조건문, 반복문, 또는 중첩 함수 내부에서 훅을 호출했을 때 발생합니다.`,
+    );
     const value = typeof initialValue === "function" ? (initialValue as () => T)() : initialValue;
     hook = { kind: "state", value };
     hooks[cursor] = hook;
@@ -101,7 +102,7 @@ export const useState = <T>(initialValue: T | (() => T)): [T, (nextValue: T | ((
     if (triggerRender) {
       triggerRender();
     } else {
-      console.warn("MiniReact: render trigger is not ready yet.");
+      console.warn("렌더 트리거가 아직 준비되지 않았습니다.");
     }
   };
 
@@ -117,12 +118,8 @@ export const useEffect = (effect: () => void | (() => void), deps?: unknown[]): 
   const oldHook = hooks[cursor] as EffectHook | undefined;
 
   let shouldRun = false;
-
-  if (deps === undefined) {
-    shouldRun = true;
-  } else if (!oldHook) {
-    shouldRun = true;
-  } else if (!shallowEquals(oldHook.deps, deps)) {
+  //의존성 배열이 없거나, 처음 렌더링이거나, 의존성 배열이 변경됐다면 -> 이펙트를 실행해라!"
+  if (deps === undefined || !oldHook || !shallowEquals(oldHook.deps, deps)) {
     shouldRun = true;
   }
 
@@ -137,24 +134,8 @@ export const useEffect = (effect: () => void | (() => void), deps?: unknown[]): 
 
   if (shouldRun) {
     context.effects.queue.push({ path, cursor });
+    enqueueEffects();
   }
 
   context.hooks.cursor.set(path, cursor + 1);
-};
-
-// --- useRef ---
-export const useRef = <T>(initialValue: T): { current: T } => {
-  const path = context.hooks.currentPath;
-  const cursor = context.hooks.currentCursor;
-  const hooks = context.hooks.currentHooks as Hook[];
-  let hook = hooks[cursor] as RefHook<T> | undefined;
-
-  if (!hook || hook.kind !== "ref") {
-    const value = { current: initialValue };
-    hook = { kind: "ref", value };
-    hooks.push(hook);
-  }
-
-  context.hooks.cursor.set(path, cursor + 1);
-  return hook.value;
 };

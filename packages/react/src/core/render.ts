@@ -1,7 +1,7 @@
 // core/render.ts
 import { context, resetHookContext } from "./context";
 import { reconcile } from "./reconciler";
-import { cleanupUnusedHooks, setRenderTrigger, enqueueEffects } from "./hooks";
+import { cleanupUnusedHooks, setRenderTrigger } from "./hooks";
 import { withEnqueue } from "../utils";
 
 export const render = (): void => {
@@ -17,9 +17,6 @@ export const render = (): void => {
 
     // 4. 훅 정리
     cleanupUnusedHooks();
-
-    // 5. 이펙트 실행 예약
-    enqueueEffects();
   } catch (error) {
     console.error("MiniReact: render failed", error);
   }
